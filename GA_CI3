@@ -1,0 +1,167 @@
+import numpy as np
+
+# Function to read data from file
+def read_data(file_path='wdbc.txt'):
+    output = []  # Create an array to store the output
+    input_data = []  # Create an array to store the input
+
+    with open(file_path, 'r') as file:
+        for line in file:
+            data = line.strip().split(',')  # Split the data using ','
+
+            # Convert 'M' to 1 and 'B' to 0
+            if data[1] == 'M':
+                output.append(1)
+            elif data[1] == 'B':
+                output.append(0)
+
+            input_data.append(data[2:])  # Store values from position 3 onward in the input
+
+    return output, input_data
+
+# Activation function (Sigmoid)
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+# Function to initialize the population
+def initialize_population(pop_size, input_size, hidden_size, output_size):
+    chromosome_length = input_size * hidden_size + hidden_size * output_size
+    return np.random.uniform(-1, 1, (pop_size, chromosome_length))
+
+# Function to decode chromosome and create MLP
+def decode_chromosome(chromosome, input_size, hidden_size, output_size):
+    input_weights = chromosome[:input_size * hidden_size].reshape((input_size, hidden_size))
+    hidden_weights = chromosome[input_size * hidden_size:(input_size + hidden_size) * (hidden_size + output_size)].reshape((hidden_size, output_size))
+    return input_weights, hidden_weights
+
+# Function to compute MLP output
+def compute_output(inputs, input_weights, hidden_weights):
+    hidden_inputs = np.dot(inputs, input_weights)
+    hidden_outputs = sigmoid(hidden_inputs)
+    final_inputs = np.dot(hidden_outputs, hidden_weights)
+    final_outputs = sigmoid(final_inputs)
+    return final_outputs
+
+# Function to calculate fitness (accuracy)
+def calculate_fitness(inputs, targets, chromosome, input_size, hidden_size, output_size):
+    input_weights, hidden_weights = decode_chromosome(chromosome, input_size, hidden_size, output_size)
+    outputs = compute_output(inputs, input_weights, hidden_weights)
+    accuracy = np.sum(np.argmax(outputs, axis=1) == np.argmax(targets, axis=1)) / len(targets)
+    return accuracy
+
+# Genetic Algorithm functions
+def crossover(parent1, parent2):
+    crossover_point = np.random.randint(len(parent1))
+    child = np.concatenate((parent1[:crossover_point], parent2[crossover_point:]))
+    return child
+
+def mutate(chromosome, mutation_rate):
+    mask = np.random.rand(len(chromosome)) < mutation_rate
+    chromosome[mask] += np.random.uniform(-0.1, 0.1, np.sum(mask))
+    return chromosome
+
+def genetic_algorithm(inputs, targets, input_size, hidden_size, output_size, pop_size, generations, mutation_rate):
+    chromosome_length = input_size * hidden_size + hidden_size * output_size
+    population = initialize_population(pop_size, input_size, hidden_size, output_size)
+
+    for generation in range(generations):
+        fitness_scores = []
+
+        for chromosome in population:
+            fitness = calculate_fitness(inputs, targets, chromosome, input_size, hidden_size, output_size)
+            fitness_scores.append(fitness)
+
+        best_idx = np.argmax(fitness_scores)
+        best_chromosome = population[best_idx]
+        best_fitness = fitness_scores[best_idx]
+
+        print(f"Generation {generation + 1}, Accuracy: {best_fitness * 100:.2f}%")
+
+        # Select the top 20% of the population
+        selected_indices = np.argsort(fitness_scores)[-int(0.2 * pop_size):]
+        selected_population = population[selected_indices]
+
+        # Crossover and mutate to create new population
+        new_population = []
+
+        for _ in range(pop_size - len(selected_population)):
+            parent1 = selected_population[np.random.randint(len(selected_population))]
+            parent2 = selected_population[np.random.randint(len(selected_population))]
+            child = crossover(parent1, parent2)
+            child = mutate(child, mutation_rate)
+            new_population.append(child)
+
+        population = np.vstack((selected_population, new_population))
+
+    return best_chromosome
+
+# Function to perform k-fold cross-validation
+def cross_validation(inputs, targets, input_size, hidden_sizes, output_size, pop_size, generations, mutation_rate, k=10):
+    fold_size = len(inputs) // k
+
+    accuracies = []
+    best_hidden_sizes = []
+    best_chromosomes = []
+
+    for fold in range(k):
+        start_idx = fold * fold_size
+        end_idx = (fold + 1) * fold_size
+
+        # Split data into training and validation sets
+        validation_inputs = inputs[start_idx:end_idx]
+        validation_targets = targets[start_idx:end_idx]
+
+        train_inputs = np.concatenate([inputs[:start_idx], inputs[end_idx:]])
+        train_targets = np.concatenate([targets[:start_idx], targets[end_idx:]])
+
+        # Train the model using genetic algorithm
+        best_chromosome = genetic_algorithm(train_inputs, train_targets, input_size, hidden_sizes[fold], output_size, pop_size, generations, mutation_rate)
+
+        # Validate the model
+        accuracy = calculate_fitness(validation_inputs, validation_targets, best_chromosome, input_size, hidden_sizes[fold], output_size)
+        accuracies.append(accuracy)
+        best_hidden_sizes.append(hidden_sizes[fold])
+        best_chromosomes.append(best_chromosome)
+
+        print(f"Fold {fold + 1}, Accuracy: {accuracy * 100:.2f}%, Best Hidden Size: {hidden_sizes[fold]}")
+
+    avg_accuracy = np.mean(accuracies)
+    print(f"\nAverage Accuracy: {avg_accuracy * 100:.2f}%")
+
+    # Find the best hidden size and chromosome based on the highest accuracy
+    best_idx = np.argmax(accuracies)
+    best_hidden_size = best_hidden_sizes[best_idx]
+    best_chromosome = best_chromosomes[best_idx]
+
+    print("\nBest MLP Structure:")
+    print(f"Best Hidden Size: {best_hidden_size}")
+    print(f"Input Weights:\n{best_chromosome[:input_size * best_hidden_size].reshape((input_size, best_hidden_size))}")
+    print(f"\nHidden Weights:\n{best_chromosome[input_size * best_hidden_size:(input_size + best_hidden_size) * (best_hidden_size + output_size)].reshape((best_hidden_size, output_size))}")
+
+# ...
+
+# Example usage
+# Assuming inputs and targets are your training data
+# You need to adjust the parameters based on your data and requirements
+
+# Call read_data to get the input and desired output
+output, input_data = read_data()
+
+# Convert input_data and output to numpy arrays
+input_data = np.array(input_data, dtype=float)
+output = np.array(output)
+
+# One-hot encode the output
+targets = np.zeros((len(output), 2))
+targets[np.arange(len(output)), output] = 1
+
+input_size = len(input_data[0])
+# Define a list of hidden sizes for each fold
+hidden_sizes = [8, 10, 12, 8, 10, 12, 8, 10, 12, 8]  # Adjust these values based on your preferences
+output_size = len(np.unique(output))
+pop_size = 50
+generations = 10
+mutation_rate = 0.1
+
+# Call cross_validation with your data
+cross_validation(input_data, targets, input_size, hidden_sizes, output_size, pop_size, generations, mutation_rate)
